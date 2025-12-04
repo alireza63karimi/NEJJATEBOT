@@ -4,13 +4,20 @@ const express = require("express");
 const config = require("./config.json");
 
 // ⛑ خواندن توکن از Secret File
-const token = fs.readFileSync("/etc/secrets/bot_token.txt", "utf8").trim();
-const bot = new Telegraf(token);
+let token;
+try {
+    token = fs.readFileSync("/etc/secrets/bot_token.txt", "utf8").trim();
+} catch (err) {
+    console.error("خطا: توکن ربات پیدا نشد. Secret File درست ساخته شده؟");
+    process.exit(1);
+}
 
-// مسیر ذخیره کاربران
+const bot = new Telegraf(token);
 const USERS_FILE = "users.json";
 
-// اگر فایل نبود یا محتوا خراب بود → بسازیم
+// ========================
+// بارگذاری و ذخیره کاربران
+// ========================
 function loadUsers() {
     try {
         const data = fs.readFileSync(USERS_FILE, "utf8");
@@ -22,7 +29,6 @@ function loadUsers() {
     }
 }
 
-// ذخیره دیتابیس
 function saveUsers(users) {
     fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
 }
@@ -35,6 +41,10 @@ const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
     res.send("ربات فعال است 🚀");
+});
+
+app.get("/healthz", (req, res) => {
+    res.send("OK");
 });
 
 app.listen(PORT, () => {
@@ -54,10 +64,7 @@ bot.start(async (ctx) => {
     }
 
     await ctx.reply("لطفاً نام و نام خانوادگی خود را ارسال کنید:");
-    users.push({
-        id: userId,
-        step: "name",
-    });
+    users.push({ id: userId, step: "name" });
     saveUsers(users);
 });
 
@@ -74,9 +81,7 @@ bot.on("text", async (ctx) => {
 
         return ctx.reply(
             "لطفاً روی دکمه زیر بزنید تا شماره تلگرام شما ارسال شود:",
-            Markup.keyboard([
-                Markup.button.contactRequest("📞 ارسال شماره")
-            ]).resize()
+            Markup.keyboard([Markup.button.contactRequest("📞 ارسال شماره")]).resize()
         );
     }
 });
@@ -113,19 +118,19 @@ bot.action("accept", async (ctx) => {
     });
 });
 
+// دستور ادمین برای مشاهده کاربران
 bot.command("users", (ctx) => {
     if (!config.ADMIN_IDS.includes(ctx.from.id)) return;
 
     const users = loadUsers();
     let text = "📋 لیست کاربران ثبت‌شده:\n\n";
-
     users.forEach((u) => {
         text += `👤 ${u.name} — ${u.phone}\n`;
     });
-
     ctx.reply(text || "کاربری ثبت نشده است.");
 });
 
-// اجرای ربات
-bot.launch();
-console.log("ربات با موفقیت اجرا شد 🚀");
+// اجرای ربات با catch error
+bot.launch()
+.then(() => console.log("ربات با موفقیت اجرا شد 🚀"))
+.catch(err => console.error("خطا در اجرای ربات:", err));
