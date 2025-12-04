@@ -1,163 +1,154 @@
 const fs = require('fs');
-const TelegramBot = require('node-telegram-bot-api');
-const express = require('express');
+const { Telegraf } = require('telegraf');
+const path = require('path');
 
-// Load bot token from secret file (Render)
-const TOKEN_PATH = '/etc/secrets/bot_token.txt';
-const token = fs.readFileSync(TOKEN_PATH, 'utf8').trim();
+// Load bot token from Render Secret File
+const token = fs.readFileSync('/etc/secrets/bot_token.txt', 'utf-8').trim();
+const bot = new Telegraf(token);
 
-// Create bot
-const bot = new TelegramBot(token, { polling: true });
+// Admin IDs
+const ADMINS = [6043389836, 188225902];
 
-// Express server for Render port binding
-const app = express();
-const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('NEJJATEBOT is running!'));
-app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
+// File to store user data
+const USERS_FILE = path.join(__dirname, 'users.json');
+let users = [];
 
-// Admin user IDs
-const admins = [6043389836, 188225902];
+// Load users from file
+if (fs.existsSync(USERS_FILE)) {
+  const data = fs.readFileSync(USERS_FILE);
+  try {
+    users = JSON.parse(data);
+  } catch {
+    users = [];
+  }
+}
 
-// Files
-const USERS_FILE = './users.json';
-const DEFAULT_USERS = [];
-let users = fs.existsSync(USERS_FILE) ? JSON.parse(fs.readFileSync(USERS_FILE)) : DEFAULT_USERS;
+// Default texts
+let WELCOME_TEXT = "هم فرکانسی عزیز خوش آمدی! برای دریافت لینک کانال VIP باید اطلاعات خواسته شده را ارسال کنید.";
+let AGREEMENT_TEXT = "من به خودم قول شرف میدهم تمارین این دوره را انجام دهم و خودم را تغییر دهم.";
+let VIP_LINK = "https://t.me/YourVIPChannel";
 
-// Configurable texts
-let welcomeMessage = "هم فرکانسی عزیز خوش آمدی برای دریافت لینک کانال vip باید اطلاعات خواسته شده را ارسال کنید";
-let agreementText = "من به خودم قول شرف میدهم تمارین این دوره را انجام دهم و خودم را تغییر دهم";
-let vipLink = "https://t.me/YOUR_VIP_CHANNEL";
-
-// Save users function
+// Save users to file
 function saveUsers() {
-    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
 }
 
-// Check if user is admin
-function isAdmin(id) {
-    return admins.includes(id);
-}
+// Start command
+bot.start(async (ctx) => {
+  const userId = ctx.from.id;
+  let user = users.find(u => u.id === userId);
 
-// Helper: find user by id
-function getUser(userId) {
-    return users.find(u => u.id === userId);
-}
-
-// Bot commands
-bot.onText(/\/start/i, (msg) => {
-    const chatId = msg.chat.id;
-    bot.sendMessage(chatId, welcomeMessage, {
-        reply_markup: {
-            keyboard: [[{ text: "ارسال نام و شماره", request_contact: true }]],
-            resize_keyboard: true,
-            one_time_keyboard: true
-        }
+  if (!user) {
+    await ctx.reply(WELCOME_TEXT);
+    await ctx.reply(AGREEMENT_TEXT, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "تایید میکنم ✅", callback_data: "agree" }]
+        ]
+      }
     });
+  } else {
+    await ctx.reply("شما قبلاً ثبت نام کرده‌اید.");
+    await sendVIPLink(ctx, user);
+  }
 });
 
-// Receive contact
-bot.on('contact', (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
+// Agreement button
+bot.on('callback_query', async (ctx) => {
+  const userId = ctx.from.id;
+  if (ctx.callbackQuery.data === 'agree') {
+    let user = users.find(u => u.id === userId);
+    if (!user) {
+      // Ask for full name
+      await ctx.reply("لطفاً نام و نام خانوادگی خود را ارسال کنید:");
+      bot.on('text', async (msgCtx) => {
+        if (msgCtx.from.id === userId) {
+          const fullName = msgCtx.message.text;
+          // Ask for contact
+          await msgCtx.reply("لطفاً روی دکمه زیر بزنید تا شماره تلگرام شما ارسال شود:", {
+            reply_markup: {
+              keyboard: [
+                [{ text: "ارسال شماره", request_contact: true }]
+              ],
+              resize_keyboard: true,
+              one_time_keyboard: true
+            }
+          });
 
-    if (getUser(userId)) {
-        bot.sendMessage(chatId, "شما قبلاً اطلاعات خود را ارسال کرده‌اید.");
-        return;
+          bot.on('contact', async (contactCtx) => {
+            if (contactCtx.from.id === userId) {
+              const phoneNumber = contactCtx.message.contact.phone_number;
+              const date = new Date().toISOString();
+              const newUser = {
+                id: userId,
+                fullName,
+                phoneNumber,
+                joinedAt: date
+              };
+              users.push(newUser);
+              saveUsers();
+
+              await contactCtx.reply("ثبت نام شما با موفقیت انجام شد!");
+              await sendVIPLink(contactCtx, newUser);
+            }
+          });
+        }
+      });
     }
+  }
+});
 
-    const name = msg.from.first_name || "";
-    const lastName = msg.from.last_name || "";
-    const phone = msg.contact.phone_number || "";
-
-    users.push({ id: userId, name, lastName, phone });
+// Send VIP link once
+async function sendVIPLink(ctx, user) {
+  if (user.linkSent) {
+    await ctx.reply("شما قبلاً لینک را دریافت کرده‌اید.");
+  } else {
+    await ctx.reply(`لینک کانال VIP شما: ${VIP_LINK}`);
+    user.linkSent = true;
     saveUsers();
-
-    // Send agreement
-    bot.sendMessage(chatId, agreementText, {
-        reply_markup: {
-            inline_keyboard: [[{ text: "تایید میکنم", callback_data: "agree" }]]
-        }
-    });
-});
-
-// Handle agreement button
-bot.on('callback_query', (query) => {
-    const chatId = query.message.chat.id;
-    const userId = query.from.id;
-
-    if (query.data === 'agree') {
-        // Check again if user already got VIP link
-        const user = getUser(userId);
-        if (user && !user.linkSent) {
-            bot.sendMessage(chatId, `لینک کانال VIP شما: ${vipLink}`);
-            user.linkSent = true;
-            saveUsers();
-        } else {
-            bot.sendMessage(chatId, "شما قبلاً لینک کانال را دریافت کرده‌اید.");
-        }
-    }
-});
+  }
+}
 
 // Admin commands
-bot.onText(/\/admin/i, (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-
-    if (!isAdmin(userId)) {
-        bot.sendMessage(chatId, "دسترسی ندارید.");
-        return;
-    }
-
-    bot.sendMessage(chatId, "منوی ادمین:\n1. تغییر متن خوش‌آمد\n2. تغییر متن توافقنامه\n3. تغییر لینک VIP\n4. مشاهده کاربران", {
-        reply_markup: {
-            keyboard: [
-                ["تغییر متن خوش‌آمد", "تغییر متن توافقنامه"],
-                ["تغییر لینک VIP", "مشاهده کاربران"]
-            ],
-            resize_keyboard: true,
-            one_time_keyboard: true
-        }
-    });
+bot.command('admin', (ctx) => {
+  if (!ADMINS.includes(ctx.from.id)) return;
+  ctx.reply("دستورات ادمین:\n/setwelcome - تغییر متن خوش آمدگویی\n/setagreement - تغییر متن توافقنامه\n/setlink - تغییر لینک کانال VIP\n/listusers - مشاهده کاربران ثبت نام شده");
 });
 
-// Admin actions
-bot.on('message', (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-
-    if (!isAdmin(userId)) return;
-
-    const text = msg.text;
-
-    switch (text) {
-        case "تغییر متن خوش‌آمد":
-            bot.sendMessage(chatId, "لطفاً متن خوش‌آمد جدید را ارسال کنید:");
-            bot.once('message', (reply) => {
-                welcomeMessage = reply.text;
-                bot.sendMessage(chatId, "متن خوش‌آمد به‌روز شد.");
-            });
-            break;
-        case "تغییر متن توافقنامه":
-            bot.sendMessage(chatId, "لطفاً متن توافقنامه جدید را ارسال کنید:");
-            bot.once('message', (reply) => {
-                agreementText = reply.text;
-                bot.sendMessage(chatId, "متن توافقنامه به‌روز شد.");
-            });
-            break;
-        case "تغییر لینک VIP":
-            bot.sendMessage(chatId, "لطفاً لینک VIP جدید را ارسال کنید:");
-            bot.once('message', (reply) => {
-                vipLink = reply.text;
-                bot.sendMessage(chatId, "لینک VIP به‌روز شد.");
-            });
-            break;
-        case "مشاهده کاربران":
-            if (users.length === 0) {
-                bot.sendMessage(chatId, "هیچ کاربری ثبت نشده است.");
-            } else {
-                const list = users.map(u => `ID: ${u.id}\nنام: ${u.name} ${u.lastName}\nشماره: ${u.phone}\nدریافت لینک: ${u.linkSent ? "✅" : "❌"}`).join("\n\n");
-                bot.sendMessage(chatId, list);
-            }
-            break;
-    }
+// Change welcome text
+bot.command('setwelcome', (ctx) => {
+  if (!ADMINS.includes(ctx.from.id)) return;
+  const newText = ctx.message.text.replace('/setwelcome ', '');
+  WELCOME_TEXT = newText;
+  ctx.reply("متن خوش آمدگویی تغییر یافت.");
 });
+
+// Change agreement text
+bot.command('setagreement', (ctx) => {
+  if (!ADMINS.includes(ctx.from.id)) return;
+  const newText = ctx.message.text.replace('/setagreement ', '');
+  AGREEMENT_TEXT = newText;
+  ctx.reply("متن توافقنامه تغییر یافت.");
+});
+
+// Change VIP link
+bot.command('setlink', (ctx) => {
+  if (!ADMINS.includes(ctx.from.id)) return;
+  const newLink = ctx.message.text.replace('/setlink ', '');
+  VIP_LINK = newLink;
+  ctx.reply("لینک کانال VIP تغییر یافت.");
+});
+
+// List users
+bot.command('listusers', (ctx) => {
+  if (!ADMINS.includes(ctx.from.id)) return;
+  let list = users.map(u => `${u.fullName} | ${u.phoneNumber} | ${u.joinedAt}`).join('\n');
+  ctx.reply(list || "هیچ کاربری ثبت نشده است.");
+});
+
+// Launch bot
+bot.launch().then(() => console.log("BOT STARTED 🚀"));
+
+// Enable graceful stop
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
