@@ -9,14 +9,17 @@ const bot = new Telegraf(token);
 // مسیر ذخیره کاربران
 const USERS_FILE = "users.json";
 
-// اگر فایل نبود → بسازیم
-if (!fs.existsSync(USERS_FILE)) {
-    fs.writeFileSync(USERS_FILE, JSON.stringify([]));
-}
-
-// خواندن دیتابیس
+// اگر فایل نبود یا محتوا خراب بود → بسازیم
 function loadUsers() {
-    return JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
+    try {
+        const data = fs.readFileSync(USERS_FILE, "utf8");
+        const parsed = JSON.parse(data);
+        // اگر فایل آرایه نیست، آرایه بساز
+        if (!Array.isArray(parsed)) return [];
+        return parsed;
+    } catch (e) {
+        return [];
+    }
 }
 
 // ذخیره دیتابیس
