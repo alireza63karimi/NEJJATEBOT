@@ -1,91 +1,37 @@
 const fs = require('fs');
 const TelegramBot = require('node-telegram-bot-api');
+const express = require('express');
 
-// Load bot token from Secret File on Render
+// Load bot token from secret file
 const token = fs.readFileSync('/etc/secrets/bot_token.txt', 'utf8').trim();
-console.log("BOT TOKEN LOADED FROM SECRET FILE.");
+console.log('BOT TOKEN LOADED FROM SECRET FILE.');
 
 const bot = new TelegramBot(token, { polling: true });
 
-// Load config
-const config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
+// Express server for Render port binding
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Bot is running'));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
-// Load users
+// Users file
+const usersFile = './users.json';
 let users = [];
-if (fs.existsSync('users.json')) {
-  const data = fs.readFileSync('users.json', 'utf8');
-  users = data ? JSON.parse(data) : [];
+if (fs.existsSync(usersFile)) {
+    const data = fs.readFileSync(usersFile, 'utf8');
+    try { users = JSON.parse(data); } 
+    catch { users = []; }
+} else {
+    fs.writeFileSync(usersFile, '[]');
 }
 
-// Helper to save users
-function saveUsers() {
-  fs.writeFileSync('users.json', JSON.stringify(users, null, 2));
-}
+// Admins
+const admins = [6043389836, 188225902];
 
-// Start command
-bot.onText(/\/start/i, (msg) => {
-  const chatId = msg.chat.id;
-  const user = users.find(u => u.id === chatId);
-  if (user) {
-    bot.sendMessage(chatId, "شما قبلاً ثبت نام کرده‌اید.");
-    return;
-  }
+// Default messages (can be edited by admin)
+let welcomeMessage = 'هم فرکانسی عزیز خوش آمدی! برای دریافت لینک کانال VIP باید اطلاعات خواسته شده را ارسال کنید.';
+let agreementText = 'من به خودم قول شرف می‌دهم تمارین این دوره را انجام دهم و خودم را تغییر دهم';
+let vipLink = 'https://t.me/+VIPChannelLinkHere';
 
-  bot.sendMessage(chatId, config.welcomeMessage, {
-    reply_markup: {
-      keyboard: [[{ text: "ارسال شماره", request_contact: true }]],
-      one_time_keyboard: true
-    }
-  });
-});
-
-// Handle contact info
-bot.on('contact', (msg) => {
-  const chatId = msg.chat.id;
-  const contact = msg.contact;
-  if (users.find(u => u.id === chatId)) {
-    bot.sendMessage(chatId, "شما قبلاً ثبت نام کرده‌اید.");
-    return;
-  }
-
-  users.push({
-    id: chatId,
-    first_name: contact.first_name,
-    last_name: contact.last_name || '',
-    phone_number: contact.phone_number
-  });
-  saveUsers();
-
-  // Send agreement
-  bot.sendMessage(chatId, config.agreementText, {
-    reply_markup: {
-      keyboard: [[{ text: "تایید میکنم" }]],
-      one_time_keyboard: true
-    }
-  });
-});
-
-// Handle agreement confirmation
-bot.on('message', (msg) => {
-  const chatId = msg.chat.id;
-  if (msg.text === "تایید میکنم") {
-    const user = users.find(u => u.id === chatId);
-    if (!user.linkSent) {
-      bot.sendMessage(chatId, `لینک کانال VIP شما: ${config.vipLink}`);
-      user.linkSent = true;
-      saveUsers();
-    } else {
-      bot.sendMessage(chatId, "شما قبلاً لینک را دریافت کرده‌اید.");
-    }
-  }
-});
-
-// Admin commands
-bot.onText(/\/admin/i, (msg) => {
-  const chatId = msg.chat.id;
-  if (!config.admins.includes(chatId)) return;
-
-  bot.sendMessage(chatId, "دستورات مدیریت:\n1. تغییر پیام خوش‌آمد\n2. تغییر متن توافقنامه\n3. تغییر لینک VIP\n4. مشاهده کاربران");
-});
-
-// Other admin functionalities can be implemented similarly
+// Helper: save users
+function saveUsers
