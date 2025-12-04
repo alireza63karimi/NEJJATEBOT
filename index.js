@@ -1,5 +1,6 @@
 const { Telegraf, Markup } = require("telegraf");
 const fs = require("fs");
+const express = require("express");
 const config = require("./config.json");
 
 // ⛑ خواندن توکن از Secret File
@@ -14,7 +15,6 @@ function loadUsers() {
     try {
         const data = fs.readFileSync(USERS_FILE, "utf8");
         const parsed = JSON.parse(data);
-        // اگر فایل آرایه نیست، آرایه بساز
         if (!Array.isArray(parsed)) return [];
         return parsed;
     } catch (e) {
@@ -27,18 +27,32 @@ function saveUsers(users) {
     fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
 }
 
-// شروع ربات
+// ========================
+// Web Server کوچک برای Render Free
+// ========================
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+    res.send("ربات فعال است 🚀");
+});
+
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});
+
+// ========================
+// ربات تلگرام
+// ========================
 bot.start(async (ctx) => {
     const userId = ctx.from.id;
     let users = loadUsers();
 
-    // اگر قبلاً ثبت شده باشد
     const exists = users.find((u) => u.id === userId);
     if (exists) {
         return ctx.reply("شما قبلاً ثبت‌نام کرده‌اید ✅");
     }
 
-    // مرحله 1 → دریافت نام
     await ctx.reply("لطفاً نام و نام خانوادگی خود را ارسال کنید:");
     users.push({
         id: userId,
@@ -47,14 +61,12 @@ bot.start(async (ctx) => {
     saveUsers(users);
 });
 
-// دریافت پیام‌ها
 bot.on("text", async (ctx) => {
     const userId = ctx.from.id;
     let users = loadUsers();
     let user = users.find((u) => u.id === userId);
     if (!user) return;
 
-    // مرحله نام
     if (user.step === "name") {
         user.name = ctx.message.text;
         user.step = "phone";
@@ -69,7 +81,6 @@ bot.on("text", async (ctx) => {
     }
 });
 
-// دریافت شماره
 bot.on("contact", async (ctx) => {
     const userId = ctx.from.id;
     let users = loadUsers();
@@ -86,7 +97,6 @@ bot.on("contact", async (ctx) => {
     ]));
 });
 
-// تایید توافقنامه
 bot.action("accept", async (ctx) => {
     const userId = ctx.from.id;
     let users = loadUsers();
@@ -103,7 +113,6 @@ bot.action("accept", async (ctx) => {
     });
 });
 
-// ادمین: دریافت لیست کاربران
 bot.command("users", (ctx) => {
     if (!config.ADMIN_IDS.includes(ctx.from.id)) return;
 
