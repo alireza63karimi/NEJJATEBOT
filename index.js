@@ -205,4 +205,7 @@ bot.action('ADMIN_CHANGE_AGREEMENT', async (ctx) => { if (isAdmin(ctx.from.id)) 
 bot.action('ADMIN_CHANGE_VIP', async (ctx) => { if (isAdmin(ctx.from.id)) { adminState[ctx.from.id] = { mode: 'changeVipLink' }; await ctx.reply('لینک VIP جدید را ارسال کنید:'); }});
 bot.action('ADMIN_LIST_USERS', async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
-  const lines = Object.values(usersDB).map(u => `ID:${u.id} | نام:${u.full_name} | شماره:${u.contact_phone} | تایید:${u.agreementAccepted
+  const allUsers = Object.values(usersDB);
+  if (allUsers.length === 0) return ctx.reply('هیچ کاربری ثبت نشده.');
+  const lines = allUsers.map(u => {
+    return `ID:${u.id} | نام:${u.full_name || '-'} | شماره:${u.contact_phone || '-'} | تایید:${u.agreementAccepted ? '✅' : '❌'}
