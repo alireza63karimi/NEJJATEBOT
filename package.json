@@ -1,17 +1,18 @@
 {
   "name": "nejjatebot",
   "version": "1.0.0",
-  "description": "NEJJATEBOT Telegram bot",
+  "description": "NEJJATEBOT - Telegram bot for VIP channel access",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "express": "^4.18.2",
-    "telegraf": "^4.16.3"
-  },
-  "engines": {
-    "node": ">=22.0.0"
+    "telegraf": "^4.16.3",
+    "fs-extra": "^11.1.1"
   },
   "author": "Alireza Karimi",
   "license": "MIT"
