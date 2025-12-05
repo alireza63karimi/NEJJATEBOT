@@ -1,7 +1,8 @@
 {
-  "welcomeMessage": "هم فرکانسی عزیز خوش آمدی برای دریافت لینک کانال VIP باید اطلاعات خواسته شده را ارسال کنید",
+  "welcomeMessage": "هم فرکانسی عزیز خوش آمدی. برای دریافت لینک کانال VIP باید اطلاعات خواسته‌شده را ارسال کنید.",
   "agreementText": "من به خودم قول شرف می‌دهم تمارین این دوره را انجام دهم و خودم را تغییر دهم",
-  "vipChannelId": "",               
-  "vipChannelLink": "https://t.me/your_fallback_vip_link",
-  "adminIds": [6043389836, 188225902]
+  "vipChannelLink": "https://t.me/+example", 
+  "vipChannelUsername": "VIPNEJJATE", 
+  "autoInviteMode": true,
+  "adminIds": [123456789]
 }
