@@ -1,9 +1,10 @@
 /**
- * NEJJATEBOT - index.js (Ready for Render)
+ * NEJJATEBOT - index.js (Final)
  * - Admins can test VIP link multiple times
  * - Saves names, username, phone
  * - One-time invite for normal users
  * - Webhook mode
+ * - Add/Remove admins dynamically
  */
 
 const fs = require('fs-extra');
@@ -88,13 +89,15 @@ async function botIsAdminInChannel(channelId) {
   } catch (e) { console.warn('botIsAdminInChannel failed:', e.message); return false; }
 }
 
+// Create one-time invite or fallback
 async function createOneTimeInvite() {
   if (!config.vipChannelId) return null;
-  if (!(await botIsAdminInChannel(config.vipChannelId))) {
-    console.warn('Bot is not admin in channel', config.vipChannelId);
-    return null;
-  }
   try {
+    const isBotAdmin = await botIsAdminInChannel(config.vipChannelId);
+    if (!isBotAdmin) {
+      console.warn('ربات ادمین کانال نیست. لینک fallback استفاده می‌شود.');
+      return null;
+    }
     const res = await bot.telegram.createChatInviteLink(config.vipChannelId, { member_limit: 1 });
     return res && (res.invite_link || res.link);
   } catch (e) {
@@ -173,6 +176,7 @@ bot.on('callback_query', async (ctx) => {
   const id = ctx.from.id;
   const data = ctx.callbackQuery.data;
   if (data !== 'AGREE_VIP') return ctx.answerCbQuery();
+
   const user = findUser(id);
   if (!user) { await ctx.reply('خطا: کاربر پیدا نشد. لطفاً /start بزنید.'); return ctx.answerCbQuery(); }
 
@@ -192,11 +196,13 @@ bot.on('callback_query', async (ctx) => {
 bot.command('admin', async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.reply('دسترسی ندارید.');
   const menu = `پنل ادمین:
-/listusers - لیست کاربران
-/setwelcome <متن> - تغییر پیام خوش‌آمد
-/setagreement <متن> - تغییر توافقنامه
-/setviplink <لینک> - تغییر لینک fallback
-/setvipchannel <@channel_or_id> - تنظیم کانال برای لینک یک‌بارمصرف`;
+  /listusers - لیست کاربران
+  /setwelcome <متن> - تغییر پیام خوش‌آمد
+  /setagreement <متن> - تغییر توافقنامه
+  /setviplink <لینک> - تغییر لینک fallback
+  /setvipchannel <@channel_or_id> - تنظیم کانال برای لینک یک‌بارمصرف
+  /addadmin <user_id> - اضافه کردن ادمین
+  /removeadmin <user_id> - حذف ادمین`;
   await ctx.reply(menu);
 });
 
@@ -234,6 +240,28 @@ bot.command('setvipchannel', async (ctx) => {
   const newText = ctx.message.text.replace('/setvipchannel', '').trim();
   if (!newText) return ctx.reply('فرمت: /setvipchannel @channel_or_id');
   config.vipChannelId = newText; fs.writeJsonSync(CONFIG_FILE, config, { spaces: 2 }); await ctx.reply('vipChannelId به‌روز شد.');
+});
+
+// ADD/REMOVE ADMIN
+bot.command('addadmin', async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.reply('دسترسی ندارید.');
+  const id = Number(ctx.message.text.split(' ')[1]);
+  if (!id) return ctx.reply('فرمت: /addadmin <user_id>');
+  if (!config.adminIds.includes(id)) {
+    config.adminIds.push(id);
+    fs.writeJsonSync(CONFIG_FILE, config, { spaces: 2 });
+    return ctx.reply(`ادمین با شناسه ${id} اضافه شد.`);
+  }
+  return ctx.reply('این شناسه قبلاً ادمین است.');
+});
+
+bot.command('removeadmin', async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.reply('دسترسی ندارید.');
+  const id = Number(ctx.message.text.split(' ')[1]);
+  if (!id) return ctx.reply('فرمت: /removeadmin <user_id>');
+  config.adminIds = config.adminIds.filter(a => a !== id);
+  fs.writeJsonSync(CONFIG_FILE, config, { spaces: 2 });
+  return ctx.reply(`ادمین با شناسه ${id} حذف شد.`);
 });
 
 // Health
