@@ -12,7 +12,7 @@ let BOT_TOKEN = '';
 try {
   BOT_TOKEN = fs.readFileSync(BOT_TOKEN_PATH, 'utf8').trim();
 } catch (e) {
-  console.error('فایل bot_token.txt یافت نشد. لطفاً در Render بسازید.');
+  console.error('فایل bot_token.txt یافت نشد.');
   process.exit(1);
 }
 if (!BOT_TOKEN) {
@@ -205,4 +205,4 @@ bot.action('ADMIN_CHANGE_AGREEMENT', async (ctx) => { if (isAdmin(ctx.from.id)) 
 bot.action('ADMIN_CHANGE_VIP', async (ctx) => { if (isAdmin(ctx.from.id)) { adminState[ctx.from.id] = { mode: 'changeVipLink' }; await ctx.reply('لینک VIP جدید را ارسال کنید:'); }});
 bot.action('ADMIN_LIST_USERS', async (ctx) => {
   if (!isAdmin(ctx.from.id)) return;
-  const lines = Object.values(usersDB).map(u => `ID:${u.id} | نام:${u.full_name} | شماره:${u.contact_phone} | تایید:${u.agreementAccepted?'✅':'❌'} |
+  const lines = Object.values(usersDB).map(u => `ID:${u.id} | نام:${u.full_name} | شماره:${u.contact_phone} | تایید:${u.agreementAccepted
