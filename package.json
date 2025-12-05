@@ -1,7 +1,7 @@
 {
   "name": "nejjatebot",
   "version": "1.0.0",
-  "description": "NEJJATEBOT - Telegram bot for VIP channel access",
+  "description": "NEJJATEBOT - Telegram VIP invite bot (Render-ready)",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
