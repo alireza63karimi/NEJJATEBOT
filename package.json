@@ -1,19 +1,13 @@
 {
-  "name": "nejjatebot",
+  "name": "telegram-webhook-bot",
+  "type": "module",
   "version": "1.0.0",
-  "description": "NEJJATEBOT - Telegram VIP invite bot (Render-ready)",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
-  "engines": {
-    "node": ">=18.0.0"
-  },
   "dependencies": {
     "express": "^4.18.2",
-    "telegraf": "^4.16.3",
-    "fs-extra": "^11.1.1"
-  },
-  "author": "Alireza Karimi",
-  "license": "MIT"
+    "node-fetch": "^3.3.2"
+  }
 }
