@@ -2,7 +2,7 @@
   "welcomeMessage": "هم فرکانسی عزیز خوش آمدی برای دریافت لینک کانال VIP باید اطلاعات خواسته شده را ارسال کنید",
   "agreementText": "من به خودم قول شرف می‌دهم تمارین این دوره را انجام دهم و خودم را تغییر دهم",
   "agreementButton": "تایید میکنم ✅",
-  "vipChannelId": "",            // اگر می‌خواهی لینک یک‌بارمصرف واقعی ساخته شود اینجا @channelusername را بگذار؛ در غیر این صورت خالی بگذار
-  "vipChannelLink": "https://t.me/NEJJATE_VIP", // لینک fallback (ثابت) که ادمین می‌تواند تغییر دهد
-  "admins": [6043389836, 188225902]
+  "vipChannelId": "",
+  "vipChannelLink": "https://t.me/NEJJATE_VIP",
+  "admins": ["6043389836", "188225902"]
 }
