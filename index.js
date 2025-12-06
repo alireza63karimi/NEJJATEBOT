@@ -3,21 +3,34 @@ import fetch from "node-fetch";
 import fs from "fs";
 
 const TOKEN = process.env.BOT_TOKEN;
-const API = `https://api.telegram.org/bot${TOKEN}`;
-const WEBHOOK_URL = process.env.WEBHOOK_URL; // آدرس Render شما
+const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
+if (!TOKEN) {
+  console.error("❌ BOT_TOKEN is missing!");
+  process.exit(1);
+}
+if (!WEBHOOK_URL) {
+  console.error("❌ WEBHOOK_URL is missing!");
+  process.exit(1);
+}
+
+const API = `https://api.telegram.org/bot${TOKEN}`;
 const app = express();
 app.use(express.json());
 
 // ---------------------
-// ذخیره در فایل JSON
+// ذخیره پیام‌ها (موقت – Render پایدار نیست)
 // ---------------------
 function saveUserMessage(userId, message) {
   const file = "./data.json";
   let data = {};
 
   if (fs.existsSync(file)) {
-    data = JSON.parse(fs.readFileSync(file));
+    try {
+      data = JSON.parse(fs.readFileSync(file));
+    } catch (e) {
+      data = {};
+    }
   }
 
   if (!data[userId]) data[userId] = [];
@@ -33,13 +46,10 @@ function saveUserMessage(userId, message) {
 // ارسال پیام
 // ---------------------
 async function sendMessage(chatId, text) {
-  await fetch(`${API}/sendMessage`, {
+  return fetch(`${API}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: text,
-    }),
+    body: JSON.stringify({ chat_id: chatId, text }),
   });
 }
 
@@ -47,7 +57,7 @@ async function sendMessage(chatId, text) {
 // ارسال عکس
 // ---------------------
 async function sendPhoto(chatId, url, caption) {
-  await fetch(`${API}/sendPhoto`, {
+  return fetch(`${API}/sendPhoto`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -62,62 +72,59 @@ async function sendPhoto(chatId, url, caption) {
 // Webhook Endpoint
 // ---------------------
 app.post(`/webhook/${TOKEN}`, async (req, res) => {
-  const update = req.body;
-
   try {
+    const update = req.body;
+
     if (update.message) {
       const chatId = update.message.chat.id;
       const text = update.message.text || "";
 
       saveUserMessage(chatId, text);
 
-      // --- دستور /start
       if (text === "/start") {
-        await sendMessage(chatId, "سلام! ربات با موفقیت فعال شد 😊");
+        await sendMessage(chatId, "سلام! ربات با موفقیت فعال شد ✔️");
         return res.sendStatus(200);
       }
 
-      // --- دستور دریافت تصویر
       if (text.startsWith("عکس")) {
-        await sendPhoto(
-          chatId,
-          "https://picsum.photos/600",
-          "این هم یک عکس تصادفی!"
-        );
+        await sendPhoto(chatId, "https://picsum.photos/600", "عکس تصادفی 📸");
         return res.sendStatus(200);
       }
 
-      // --- پاسخ به سایر پیام‌ها
       await sendMessage(chatId, `پیامت رسید: ${text}`);
     }
 
     res.sendStatus(200);
   } catch (err) {
-    console.error("Error:", err);
+    console.error("Webhook Error:", err);
     res.sendStatus(500);
   }
 });
 
 // ---------------------
-// فعال‌سازی Webhook
+// Webhook Setup
 // ---------------------
-async function setWebhook() {
+async function setupWebhook() {
   const url = `${WEBHOOK_URL}/webhook/${TOKEN}`;
-  const result = await fetch(`${API}/setWebhook`, {
+
+  console.log("Setting webhook →", url);
+
+  const response = await fetch(`${API}/setWebhook`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url }),
   });
 
-  const res = await result.json();
-  console.log("Webhook set:", res);
+  const json = await response.json();
+  console.log("Webhook set result:", json);
 }
 
 // ---------------------
-// اجرای سرور
+// Start Server
 // ---------------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, async () => {
-  console.log("Server running on port:", PORT);
-  await setWebhook();
+
+app.listen(PORT, "0.0.0.0", async () => {
+  console.log("🚀 Server running on:", PORT);
+  await setupWebhook();
 });
