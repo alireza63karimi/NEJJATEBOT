@@ -4,5 +4,9 @@
   "agreementButton": "تایید میکنم ✅",
   "vipChannelLink": "https://t.me/NEJJATE_VIP",
   "admins": ["6043389836", "188225902"],
-  "waitingFor": null
+  "waitingFor": null,
+  "vipSendMode": "auto",
+  "manualVipLinks": {
+    "current": ""
+  }
 }
