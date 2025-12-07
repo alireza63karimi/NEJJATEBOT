@@ -3,10 +3,8 @@
   "agreementText": "من به خودم قول شرف می‌دهم تمارین این دوره را انجام دهم و خودم را تغییر دهم",
   "agreementButton": "تایید میکنم ✅",
   "vipChannelLink": "https://t.me/NEJJATE_VIP",
-  "admins": ["6043389836", "188225902"],
+  "admins": ["6043389836","188225902"],
   "waitingFor": null,
-  "vipSendMode": "auto",
-  "manualVipLinks": {
-    "current": ""
-  }
+  "vipSendMode": "manual",
+  "manualVipLinks": { "current": "" }
 }
