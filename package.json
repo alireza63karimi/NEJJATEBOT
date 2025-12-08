@@ -1,17 +1,15 @@
 {
   "name": "nejjatebot",
   "version": "1.0.0",
+  "description": "Telegram bot NEJJATEBOT - VIP link sender",
   "main": "index.js",
-  "license": "MIT",
-  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node index.js"
   },
-  "engines": {
-    "node": ">=18.0.0"
-  },
   "dependencies": {
-    "express": "^4.18.2",
-    "fs-extra": "^11.1.1"
+    "express": "^4.18.2"
   }
 }
