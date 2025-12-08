@@ -1,114 +1,101 @@
-// index.js - NEJJATEBOT (final, optimized)
-// Requires Node >=18 (fetch is available)
+// index.js - NEJJATEBOT Professional (v2025)
+// Node >=18 (global fetch available)
 
 const express = require('express');
-const fs = require('fs-extra');
+const fs = require('fs');
 const path = require('path');
-const ROOT = __dirname;
 
+const ROOT = __dirname;
 const CONFIG_FILE = path.join(ROOT, 'config.json');
 const USERS_FILE = path.join(ROOT, 'users.json');
+const TOKEN_PATH = '/etc/secrets/bot_token.txt'; // Render secret file
 
-// fetch compatibility for environments without global fetch
-let fetchFn = global.fetch;
-if (!fetchFn) {
-  try { fetchFn = (...args) => import('node-fetch').then(m => m.default(...args)); }
-  catch (e) { console.error('fetch not available and node-fetch import failed', e); process.exit(1); }
+// ------------------ Load Bot Token ------------------
+let BOT_TOKEN = process.env.BOT_TOKEN || null;
+if (!BOT_TOKEN) {
+  if (fs.existsSync(TOKEN_PATH)) {
+    BOT_TOKEN = fs.readFileSync(TOKEN_PATH, 'utf8').trim();
+  }
 }
-const fetch = (...args) => fetchFn(...args);
+if (!BOT_TOKEN) {
+  console.error('❌ Bot token not found. Set BOT_TOKEN env or place bot_token.txt in secret files.');
+  process.exit(1);
+}
+const TELEGRAM_API = (method) => `https://api.telegram.org/bot${BOT_TOKEN}/${method}`;
 
-// --- load/save helpers (minimize disk writes) ---
-function loadJsonSafe(file, fallback) {
+// ------------------ Small JSON helpers ------------------
+function loadJson(file, fallback) {
   try {
     if (!fs.existsSync(file)) {
-      fs.writeJsonSync(file, fallback, { spaces: 2 });
-      return fallback;
+      fs.writeFileSync(file, JSON.stringify(fallback, null, 2));
+      return JSON.parse(JSON.stringify(fallback));
     }
-    return fs.readJsonSync(file);
+    const txt = fs.readFileSync(file, 'utf8');
+    return JSON.parse(txt || JSON.stringify(fallback));
   } catch (e) {
-    console.error('JSON load error', file, e && e.message);
-    try { fs.writeJsonSync(file, fallback, { spaces: 2 }); } catch (_) {}
-    return fallback;
+    try { fs.writeFileSync(file, JSON.stringify(fallback, null, 2)); } catch (_) {}
+    return JSON.parse(JSON.stringify(fallback));
+  }
+}
+function saveJsonIfChanged(file, obj, lastRef) {
+  try {
+    const s = JSON.stringify(obj, null, 2);
+    if (s !== lastRef.value) {
+      fs.writeFileSync(file, s);
+      lastRef.value = s;
+    }
+  } catch (e) {
+    console.error('saveJson error', file, e?.message);
   }
 }
 
-let config = loadJsonSafe(CONFIG_FILE, {
+// ------------------ Load config & users ------------------
+let config = loadJson(CONFIG_FILE, {
   welcomeMessage: "هم فرکانسی عزیز خوش آمدی برای دریافت لینک کانال VIP باید اطلاعات خواسته شده را ارسال کنید",
   agreementText: "من به خودم قول شرف می‌دهم تمارین این دوره را انجام دهم و خودم را تغییر دهم",
   agreementButton: "تایید میکنم ✅",
-  // For manual mode we use vipChannelLink; for auto mode we need vipChannelId (id or @username of channel)
-  vipChannelLink: "https://t.me/NEJJATE_VIP",
-  vipChannelId: "@NEJJATE_VIP", // <-- set to channel username (or numeric id) where bot is admin
+  vipChannelLink: "https://t.me/NEJJATE_VIP", // manual fallback
+  vipChannelId: null,     // prefer @username or numeric id for auto mode
+  vipSendMode: "auto",    // "auto" or "manual"
   admins: ["6043389836","188225902"],
-  waitingFor: null,
-  vipSendMode: "manual", // "manual" or "auto"
-  manualVipLinks: { current: "" }
+  waitingFor: {},         // per-admin waiting states
+  manualVipLinks: { current: null }
 });
+let users = loadJson(USERS_FILE, {});
+const lastConfigJSON = { value: JSON.stringify(config, null, 2) };
+const lastUsersJSON = { value: JSON.stringify(users, null, 2) };
+function saveConfig(){ saveJsonIfChanged(CONFIG_FILE, config, lastConfigJSON); }
+function saveUsers(){ saveJsonIfChanged(USERS_FILE, users, lastUsersJSON); }
 
-let users = loadJsonSafe(USERS_FILE, {});
-let lastConfigJSON = JSON.stringify(config);
-let lastUsersJSON = JSON.stringify(users);
-
-function saveConfig() {
-  try {
-    const s = JSON.stringify(config, null, 2);
-    if (s !== lastConfigJSON) { fs.writeFileSync(CONFIG_FILE, s); lastConfigJSON = s; }
-  } catch (e) { console.error('saveConfig error', e); }
-}
-function saveUsers() {
-  try {
-    const s = JSON.stringify(users, null, 2);
-    if (s !== lastUsersJSON) { fs.writeFileSync(USERS_FILE, s); lastUsersJSON = s; }
-  } catch (e) { console.error('saveUsers error', e); }
-}
-
-// --- read BOT_TOKEN & WEBHOOK_URL (Render: secret file or env) ---
-let BOT_TOKEN = process.env.BOT_TOKEN || null;
-const SECRET_PATH_RENDER = '/etc/secrets/bot_token.txt';
-if (!BOT_TOKEN && fs.existsSync(SECRET_PATH_RENDER)) {
-  try { BOT_TOKEN = fs.readFileSync(SECRET_PATH_RENDER, 'utf8').trim(); } catch (e) {}
-}
-if (!BOT_TOKEN && fs.existsSync(path.join(ROOT, 'bot_token.txt'))) {
-  try { BOT_TOKEN = fs.readFileSync(path.join(ROOT, 'bot_token.txt'), 'utf8').trim(); } catch (e) {}
-}
-if (!BOT_TOKEN && process.env.BOT_TOKEN) BOT_TOKEN = process.env.BOT_TOKEN.trim();
-
-if (!BOT_TOKEN) { console.error('❌ توکن ربات پیدا نشد! قرار دادن bot_token.txt در Secrets Render یا متغیر محیطی BOT_TOKEN لازم است.'); process.exit(1); }
-
-const WEBHOOK_URL = process.env.WEBHOOK_URL || process.env.RENDER_EXTERNAL_URL || '';
-
-if (!WEBHOOK_URL) {
-  console.warn('⚠️ WEBHOOK_URL تنظیم نشده است؛ webhook خودکار ست نخواهد شد. لطفاً WEBHOOK_URL را در Environment Variables قرار بده.');
-}
-
-// --- Telegram helpers ---
-const TELEGRAM_API = (t) => `https://api.telegram.org/bot${t}`;
-
+// ------------------ Telegram helpers ------------------
 async function tg(method, body) {
-  const url = `${TELEGRAM_API(BOT_TOKEN)}/${method}`;
   try {
-    const res = await fetch(url, {
+    const res = await fetch(TELEGRAM_API(method), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body)
     });
     const j = await res.json();
-    if (!j || !j.ok) {
-      // log for debugging (do not expose token)
-      console.error(`tg ${method} returned error:`, j && j.description ? j.description : j);
-    }
+    if (!j || !j.ok) console.error('tg error', method, j?.description || j);
     return j;
   } catch (e) {
-    console.error('tg fetch error', method, e && e.message);
+    console.error('tg fetch failed', method, e?.message);
     return null;
   }
 }
-
 async function sendMessage(chat_id, text, extra = {}) {
-  const payload = Object.assign({ chat_id: chat_id, text: String(text), parse_mode: 'HTML' }, extra);
-  return await tg('sendMessage', payload);
+  try {
+    return await tg('sendMessage', Object.assign({ chat_id, text: String(text), parse_mode: 'HTML' }, extra));
+  } catch (e) {
+    console.error('sendMessage error', e?.message);
+  }
+}
+async function safeAnswerCallback(cb_id, text = '') {
+  if (!cb_id) return;
+  try { await tg('answerCallbackQuery', { callback_query_id: cb_id, text }); } catch (e) { /* ignore */ }
 }
 
+// ------------------ Keyboards ------------------
 function contactKeyboard() {
   return {
     reply_markup: JSON.stringify({
@@ -118,300 +105,328 @@ function contactKeyboard() {
     })
   };
 }
-
-function isAdmin(userId) {
-  if (!userId) return false;
-  const s = String(userId);
-  return Array.isArray(config.admins) && config.admins.map(x => String(x)).includes(s);
+function adminInlineKeyboard() {
+  return {
+    reply_markup: JSON.stringify({
+      inline_keyboard: [
+        [{ text: '🔍 مشاهده خوش‌آمد', callback_data: 'ADMIN_VIEW_WELCOME' }, { text: '✏️ تغییر خوش‌آمد', callback_data: 'ADMIN_EDIT_WELCOME' }],
+        [{ text: '🔍 مشاهده توافقنامه', callback_data: 'ADMIN_VIEW_AGREEMENT' }, { text: '✏️ تغییر توافقنامه', callback_data: 'ADMIN_EDIT_AGREEMENT' }],
+        [{ text: '🔍 مشاهده لینک', callback_data: 'ADMIN_VIEW_VIP' }, { text: '✏️ تغییر لینک', callback_data: 'ADMIN_EDIT_VIP' }],
+        [{ text: '👥 مشاهده ادمین‌ها', callback_data: 'ADMIN_VIEW_ADMINS' }, { text: '🧾 مشاهده کاربران', callback_data: 'ADMIN_LIST_USERS' }],
+        [{ text: '➕ اضافه کردن ادمین', callback_data: 'ADMIN_ADD_ADMIN' }, { text: '➖ حذف ادمین', callback_data: 'ADMIN_REMOVE_ADMIN' }],
+        [{ text: '🔁 لینک اتومات (یکبار مصرف)', callback_data: 'VIP_MODE_AUTO' }, { text: '✋ لینک دستی', callback_data: 'VIP_MODE_MANUAL' }]
+      ]
+    })
+  };
 }
 
-function chunkText(text, n = 3000) {
+// ------------------ Utilities ------------------
+function isAdmin(userId) {
+  if (!userId) return false;
+  return Array.isArray(config.admins) && config.admins.map(x => String(x)).includes(String(userId));
+}
+function chunkText(text, n = 4000) {
   const out = [];
   for (let i = 0; i < text.length; i += n) out.push(text.slice(i, i + n));
   return out;
 }
 
-// --- create single-use invite link via createChatInviteLink (auto mode) ---
-// member_limit:1 => usable once; name includes user id for traceability.
-async function createOneTimeInviteForUser(userId) {
-  const chat_id = config.vipChannelId || config.vipChannelLink;
-  if (!chat_id) return { ok: false, error: 'no_channel' };
+// ------------------ Invite queue & cache (optimized) ------------------
+const inviteQueue = [];
+const inviteCache = new Map(); // { userId -> { link, expiresAt, cacheExpiresAt } }
+let activeWorkers = 0;
+const MAX_WORKERS = 4; // conservative for 512MB RAM
 
-  // name param optional
-  const name = `invite_for_${userId}_${Date.now()}`;
-  // member_limit:1 -> one-time usable link
-  const payload = { chat_id, name, member_limit: 1 };
-
-  const res = await tg('createChatInviteLink', payload);
+// createChatInviteLink with expire_date = now + 86400 (24h)
+async function createInviteForChannel(channelIdentifier) {
+  if (!channelIdentifier) return { ok: false, error: 'no_channel' };
+  // can't resolve t.me/+ private links for API createChatInviteLink
+  if (typeof channelIdentifier === 'string' && channelIdentifier.includes('t.me/+')) {
+    return { ok: false, error: 'private_link_no_id' };
+  }
+  let chat_id = channelIdentifier;
+  if (typeof chat_id === 'string' && chat_id.startsWith('@')) {
+    const info = await tg('getChat', { chat_id });
+    if (!info || !info.ok) return { ok: false, error: 'getchat_failed' };
+    chat_id = info.result.id;
+  }
+  const expire_date = Math.floor(Date.now() / 1000) + 86400; // 24h
+  const res = await tg('createChatInviteLink', { chat_id, member_limit: 1, expire_date, creates_join_request: false });
   if (res && res.ok && res.result && res.result.invite_link) {
-    return { ok: true, invite_link: res.result.invite_link };
-  } else {
-    return { ok: false, error: res && res.description ? res.description : 'create_failed' };
+    return { ok: true, link: res.result.invite_link, expiresAt: expire_date * 1000 };
+  }
+  return { ok: false, error: res?.description || 'create_failed' };
+}
+
+async function createInvite(userId) {
+  const cached = inviteCache.get(userId);
+  if (cached && Date.now() < cached.cacheExpiresAt) return { ok: true, link: cached.link, expiresAt: cached.expiresAt };
+  const channelId = config.vipChannelId;
+  const result = await createInviteForChannel(channelId);
+  if (result.ok) {
+    inviteCache.set(userId, { link: result.link, expiresAt: result.expiresAt, cacheExpiresAt: Date.now() + 30 * 1000 });
+    return { ok: true, link: result.link, expiresAt: result.expiresAt };
+  }
+  return result;
+}
+
+async function processQueueTask(task) {
+  const { userId, chatId, callbackId, retries = 0 } = task;
+  try {
+    const res = await createInvite(userId);
+    if (res.ok) {
+      await sendMessage(chatId, `🔗 لینک VIP شما (یکبار مصرف — معتبر تا 24 ساعت):\n${res.link}`);
+      users[userId].vipSent = true; saveUsers();
+      if (callbackId) await safeAnswerCallback(callbackId);
+    } else {
+      // handle common known failures
+      if (res.error === 'private_link_no_id') {
+        const fallback = config.manualVipLinks?.current || config.vipChannelLink;
+        await sendMessage(chatId, `⚠️ کانال تنظیم‌شده قابل ساخت لینک اتومات نیست.\nلینک جایگزین:\n${fallback}`);
+        if (callbackId) await safeAnswerCallback(callbackId);
+        if (!users[userId].vipSent) { users[userId].vipSent = true; saveUsers(); }
+      } else {
+        if (retries < 2) inviteQueue.push({ userId, chatId, callbackId, retries: retries + 1 });
+        else {
+          const fallback = config.manualVipLinks?.current || config.vipChannelLink;
+          await sendMessage(chatId, `❌ خطا در ساخت لینک یکبارمصرف (${res.error}).\nلینک جایگزین:\n${fallback}`);
+          if (callbackId) await safeAnswerCallback(callbackId);
+          if (!users[userId].vipSent) { users[userId].vipSent = true; saveUsers(); }
+        }
+      }
+    }
+  } catch (e) {
+    if ((task.retries || 0) < 2) inviteQueue.push({ userId, chatId, callbackId, retries: (task.retries || 0) + 1 });
+    else {
+      const fallback = config.manualVipLinks?.current || config.vipChannelLink;
+      await sendMessage(chatId, `❌ خطای داخلی در ساخت لینک. لینک جایگزین:\n${fallback}`);
+      if (callbackId) await safeAnswerCallback(callbackId);
+      if (!users[userId].vipSent) { users[userId].vipSent = true; saveUsers(); }
+    }
+  } finally {
+    activeWorkers = Math.max(0, activeWorkers - 1);
+    scheduleQueue();
   }
 }
 
-// --- send VIP link logic (manual or auto) ---
-async function sendVipLinkToUser(userId, chatId, callbackQueryId = null) {
-  if (!users[userId]) {
-    users[userId] = { id: userId, first_name: '', last_name: '', username: '', phone: '', vipSent: false, joinDate: new Date().toISOString() };
+function scheduleQueue() {
+  while (inviteQueue.length > 0 && activeWorkers < MAX_WORKERS) {
+    const task = inviteQueue.shift();
+    if (!task) break;
+    activeWorkers++;
+    // fire-and-forget; tasks run concurrently but bounded by MAX_WORKERS
+    processQueueTask(task);
   }
+}
 
+// ------------------ send VIP link entry ------------------
+async function sendVipLinkToUser(userId, chatId, callbackId = null) {
+  if (!users[userId]) { users[userId] = { id: userId, first_name: '', last_name: '', username: '', phone: '', vipSent: false, joinDate: new Date().toISOString() }; saveUsers(); }
   if (users[userId].vipSent && !isAdmin(userId)) {
-    if (callbackQueryId) await tg('answerCallbackQuery', { callback_query_id: callbackQueryId, text: '⚠️ شما قبلاً لینک را دریافت کرده‌اید.' });
+    if (callbackId) await safeAnswerCallback(callbackId, '⚠️ شما قبلاً لینک را دریافت کرده‌اید.');
     return { ok: false, reason: 'already_sent' };
   }
 
   if (config.vipSendMode === 'auto') {
-    // auto: create one-time invite via API (bot must be admin of channel)
-    const created = await createOneTimeInviteForUser(userId);
-    if (!created.ok) {
-      if (callbackQueryId) await tg('answerCallbackQuery', { callback_query_id: callbackQueryId, text: '❌ ساخت لینک یکبارمصرف با خطا مواجه شد؛ لطفاً با ادمین تماس بگیرید.' });
-      console.error('createOneTimeInviteForUser error', created.error);
-      return { ok: false, reason: 'create_failed' };
+    if (!config.vipChannelId) {
+      const fallback = config.manualVipLinks?.current || config.vipChannelLink;
+      if (callbackId) await safeAnswerCallback(callbackId, '❌ کانال برای حالت اتومات تنظیم نشده — لینک دستی ارسال می‌شود.');
+      await sendMessage(chatId, `🔗 لینک VIP شما:\n${fallback}`);
+      if (!users[userId].vipSent) { users[userId].vipSent = true; saveUsers(); }
+      return { ok: false, reason: 'no_channel_id' };
     }
-    await sendMessage(chatId, `🔗 لینک VIP شما (یکبار مصرف):\n${created.invite_link}`);
+    inviteQueue.push({ userId, chatId, callbackId });
+    scheduleQueue();
+    return { ok: true, queued: true };
   } else {
-    // manual: send manualVipLinks.current or vipChannelLink
-    const link = (config.manualVipLinks && config.manualVipLinks.current) ? config.manualVipLinks.current : config.vipChannelLink;
-    if (!link) {
-      if (callbackQueryId) await tg('answerCallbackQuery', { callback_query_id: callbackQueryId, text: '❌ لینک VIP هنوز توسط ادمین ثبت نشده است.' });
-      return { ok: false, reason: 'no_link' };
-    }
+    const link = config.manualVipLinks?.current || config.vipChannelLink;
     await sendMessage(chatId, `🔗 لینک VIP شما:\n${link}`);
+    if (callbackId) await safeAnswerCallback(callbackId);
+    if (!users[userId].vipSent) { users[userId].vipSent = true; saveUsers(); }
+    return { ok: true };
   }
-
-  if (!isAdmin(userId)) { users[userId].vipSent = true; saveUsers(); }
-  if (callbackQueryId) await tg('answerCallbackQuery', { callback_query_id: callbackQueryId });
-  return { ok: true };
 }
 
-// --- main update handler ---
-async function handleUpdate(update) {
+// ------------------ Express webhook ------------------
+const app = express();
+app.use(express.json({ limit: '200kb' }));
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || null;
+
+app.post('/webhook', async (req, res) => {
   try {
-    // MESSAGE
+    const update = req.body;
+    if (!update) return res.send({ ok: false, message: 'no update' });
+
+    if (WEBHOOK_SECRET) {
+      const h = req.get('x-telegram-bot-api-secret-token');
+      if (!h || h !== WEBHOOK_SECRET) return res.send({ ok: false, message: 'unauthorized' });
+    }
+
+    // ack fast
+    res.sendStatus(200);
+
+    // -------- message handling ----------
     if (update.message) {
       const msg = update.message;
-      const chatId = msg.chat.id;
+      const chatId = msg.chat?.id;
       const from = msg.from || {};
-      const userId = String(from.id);
+      if (!chatId || !from.id) return;
 
-      // ensure user record and refresh name/username
-      if (!users[userId]) {
-        users[userId] = {
-          id: userId,
-          first_name: from.first_name || '',
-          last_name: from.last_name || '',
-          username: from.username || '',
-          phone: '',
-          vipSent: false,
-          joinDate: new Date().toISOString()
-        };
-        saveUsers();
-      } else {
-        let changed = false;
-        if (from.first_name && users[userId].first_name !== from.first_name) { users[userId].first_name = from.first_name; changed = true; }
-        if (from.last_name && users[userId].last_name !== from.last_name) { users[userId].last_name = from.last_name; changed = true; }
-        if (from.username && users[userId].username !== from.username) { users[userId].username = from.username; changed = true; }
-        if (changed) saveUsers();
+      const userId = String(from.id);
+      if (!users[userId]) { users[userId] = { id: userId, first_name: from.first_name || '', last_name: from.last_name || '', username: from.username || '', phone: '', vipSent: false, joinDate: new Date().toISOString() }; saveUsers(); }
+
+      // admin forwarded channel -> set vipChannelId (prefer @username if available)
+      if (msg.forward_from_chat && isAdmin(userId)) {
+        const ch = msg.forward_from_chat;
+        config.vipChannelId = ch.username ? `@${ch.username}` : String(ch.id);
+        saveConfig();
+        await sendMessage(chatId, `✅ کانال تنظیم شد: ${config.vipChannelId} (ربات باید ادمین کانال باشد).`);
+        return;
       }
 
-      const text = (msg.text || '').trim();
-
-      // If admin is in waitingFor and sent text, handle
-      if (isAdmin(userId) && config.waitingFor && config.waitingFor.by === userId && text) {
-        const what = config.waitingFor.type;
-        if (what === 'VIP') { config.vipChannelLink = text; config.waitingFor = null; saveConfig(); await sendMessage(chatId, '✔ لینک VIP بروزرسانی شد.'); return; }
-        if (what === 'WELCOME') { config.welcomeMessage = text; config.waitingFor = null; saveConfig(); await sendMessage(chatId, '✔ پیام خوش‌آمد بروزرسانی شد.'); return; }
-        if (what === 'AGREEMENT') { config.agreementText = text; config.waitingFor = null; saveConfig(); await sendMessage(chatId, '✔ متن توافقنامه بروزرسانی شد.'); return; }
-        if (what === 'ADDADMIN') {
-          // accept numeric id or @username -> try resolve username
-          let candidate = text.trim();
-          let newId = null;
-          if (/^\d+$/.test(candidate)) newId = candidate;
-          else if (candidate.startsWith('@')) {
-            try {
-              const res = await tg('getChat', { chat_id: candidate });
-              if (res && res.ok && res.result && res.result.id) newId = String(res.result.id);
-            } catch (e) { newId = null; }
+      // per-admin waiting states
+      if (config.waitingFor && config.waitingFor[userId] && msg.text) {
+        const w = config.waitingFor[userId];
+        const val = msg.text.trim();
+        if (w.type === 'WELCOME') config.welcomeMessage = val;
+        else if (w.type === 'AGREEMENT') config.agreementText = val;
+        else if (w.type === 'VIP') {
+          if (val.includes('t.me/+')) {
+            config.manualVipLinks = config.manualVipLinks || {};
+            config.manualVipLinks.current = val;
+          } else if (val.startsWith('@') || /^\-?\d+$/.test(val)) {
+            config.vipChannelId = val;
+          } else {
+            config.manualVipLinks = config.manualVipLinks || {};
+            config.manualVipLinks.current = val;
           }
-          config.waitingFor = null;
-          if (!newId) { saveConfig(); await sendMessage(chatId, '❌ شناسهٔ معتبر نبود.'); return; }
-          if (!config.admins.map(x => String(x)).includes(newId)) { config.admins.push(String(newId)); saveConfig(); await sendMessage(chatId, `✅ ادمین با id ${newId} اضافه شد.`); return; }
-          else { saveConfig(); await sendMessage(chatId, 'این شناسه قبلاً ادمین است.'); return; }
+        } else if (w.type === 'ADDADMIN') {
+          let newId = val;
+          if (val.startsWith('@')) {
+            const g = await tg('getChat', { chat_id: val });
+            if (g && g.ok && g.result && g.result.id) newId = String(g.result.id);
+            else { await sendMessage(chatId, '❌ نتوانستم یوزرنیم را پیدا کنم. لطفاً شناسه عددی ارسال کن.'); delete config.waitingFor[userId]; saveConfig(); return; }
+          }
+          if (!config.admins.map(x => String(x)).includes(String(newId))) config.admins.push(String(newId));
+        } else if (w.type === 'REMOVEADMIN') {
+          let removeId = val;
+          if (val.startsWith('@')) {
+            const g = await tg('getChat', { chat_id: val });
+            if (g && g.ok && g.result && g.result.id) removeId = String(g.result.id);
+            else { await sendMessage(chatId, '❌ نتوانستم یوزرنیم را پیدا کنم. لطفاً شناسه عددی ارسال کن.'); delete config.waitingFor[userId]; saveConfig(); return; }
+          }
+          config.admins = config.admins.filter(a => String(a) !== String(removeId));
         }
-        if (what === 'REMOVEADMIN') {
-          const candidate = text.trim();
-          config.waitingFor = null;
-          if (!/^\d+$/.test(candidate)) { saveConfig(); await sendMessage(chatId, 'فرمت اشتباه است. لطفاً فقط user id را ارسال کن.'); return; }
-          const idStr = String(candidate);
-          if (!config.admins.map(a => String(a)).includes(idStr)) { saveConfig(); await sendMessage(chatId, 'این شناسه ادمین نیست.'); return; }
-          config.admins = config.admins.filter(a => String(a) !== idStr); saveConfig(); await sendMessage(chatId, `✅ ادمین با id ${idStr} حذف شد.`); return;
-        }
+        delete config.waitingFor[userId];
+        saveConfig();
+        await sendMessage(chatId, '✅ انجام شد.');
+        return;
       }
 
       // /start
-      if (text === '/start') {
+      if (msg.text && msg.text.trim() === '/start') {
         await sendMessage(chatId, config.welcomeMessage);
         await sendMessage(chatId, 'برای اشتراک شماره تماس، دکمه زیر را بزنید:', contactKeyboard());
         return;
       }
 
-      // /admin
-      if (text && text.toLowerCase() === '/admin') {
-        if (!isAdmin(userId)) { await sendMessage(chatId, '⛔ شما ادمین نیستید.'); return; }
-        const keyboard = {
-          reply_markup: JSON.stringify({
-            inline_keyboard: [
-              [{ text: '🔍 مشاهده خوش‌آمد', callback_data: 'ADMIN_VIEW_WELCOME' }, { text: '✏️ تغییر خوش‌آمد', callback_data: 'ADMIN_EDIT_WELCOME' }],
-              [{ text: '🔍 مشاهده توافقنامه', callback_data: 'ADMIN_VIEW_AGREEMENT' }, { text: '✏️ تغییر توافقنامه', callback_data: 'ADMIN_EDIT_AGREEMENT' }],
-              [{ text: '🔍 مشاهده لینک', callback_data: 'ADMIN_VIEW_VIP' }, { text: '✏️ تغییر لینک', callback_data: 'ADMIN_EDIT_VIP' }],
-              [{ text: '👥 مشاهده ادمین‌ها', callback_data: 'ADMIN_VIEW_ADMINS' }, { text: '🧾 مشاهده کاربران', callback_data: 'ADMIN_LIST_USERS' }],
-              [{ text: '➕ اضافه کردن ادمین', callback_data: 'ADMIN_ADD_ADMIN' }, { text: '➖ حذف ادمین', callback_data: 'ADMIN_REMOVE_ADMIN' }],
-              [{ text: '🔁 لینک اتومات (ربات)', callback_data: 'VIP_MODE_AUTO' }, { text: '✋ لینک دستی (ادمین)', callback_data: 'VIP_MODE_MANUAL' }]
-            ]
-          })
-        };
-        await sendMessage(chatId, 'پنل مدیریت:', keyboard);
-        return;
-      }
-
       // contact
       if (msg.contact) {
-        const contact = msg.contact;
-        if (contact.user_id && String(contact.user_id) !== userId) { await sendMessage(chatId, 'لطفاً شمارهٔ خودتان را ارسال کنید (دکمه اشتراک شماره تماس را بزنید).'); return; }
-        users[userId].phone = contact.phone_number || '';
+        const c = msg.contact;
+        if (c.user_id && String(c.user_id) !== userId) { await sendMessage(chatId, 'لطفاً شمارهٔ خودتان را ارسال کنید.'); return; }
+        users[userId].phone = c.phone_number || '';
         saveUsers();
-        const inline = { reply_markup: JSON.stringify({ inline_keyboard: [[{ text: config.agreementButton || 'تایید', callback_data: 'AGREE' }]] }) };
-        await sendMessage(chatId, config.agreementText || 'لطفاً توافقنامه را تایید کنید.', inline);
+        await sendMessage(chatId, config.agreementText || 'لطفاً توافقنامه را تایید کنید.', {
+          reply_markup: JSON.stringify({ inline_keyboard: [[{ text: config.agreementButton || 'تایید', callback_data: 'AGREE' }]] })
+        });
         return;
       }
 
-      return;
-    }
+      // admin commands
+      if (msg.text) {
+        const text = msg.text.trim();
+        if (text.startsWith('/setchannel')) {
+          if (!isAdmin(userId)) { await sendMessage(chatId, '⛔ شما ادمین نیستید.'); return; }
+          const parts = text.split(' ').filter(Boolean);
+          if (parts.length >= 2) {
+            const val = parts[1].trim();
+            if (val.includes('t.me/+')) {
+              config.manualVipLinks = config.manualVipLinks || {};
+              config.manualVipLinks.current = val;
+              saveConfig();
+              await sendMessage(chatId, `✅ لینک خصوصی (دستی) ثبت شد. برای لینک اتومات نیاز به ID یا @username کانال است.`);
+              return;
+            } else if (val.startsWith('@') || /^\-?\d+$/.test(val)) {
+              config.vipChannelId = val;
+              saveConfig();
+              await sendMessage(chatId, `✅ vipChannelId تنظیم شد: ${val}`);
+              return;
+            } else {
+              config.manualVipLinks = config.manualVipLinks || {};
+              config.manualVipLinks.current = val;
+              saveConfig();
+              await sendMessage(chatId, `✅ لینک دستی ثبت شد.`);
+              return;
+            }
+          } else {
+            await sendMessage(chatId, 'برای تنظیم کانال: پیام کانال را فوروارد کن یا /setchannel <@username یا id یا لینک t.me/+...> را ارسال کن.');
+            return;
+          }
+        }
+        if (text.toLowerCase() === '/admin') {
+          if (!isAdmin(userId)) { await sendMessage(chatId, '⛔ شما ادمین نیستید.'); return; }
+          await sendMessage(chatId, 'پنل مدیریت:', adminInlineKeyboard());
+          return;
+        }
+      }
+    } // end update.message
 
-    // CALLBACK QUERY
+    // callback_query
     if (update.callback_query) {
       const cb = update.callback_query;
       const from = cb.from || {};
       const userId = String(from.id);
       const data = cb.data;
-      const chatId = cb.message?.chat?.id || null;
+      const chatId = cb.message?.chat?.id || userId;
 
-      // AGREE
       if (data === 'AGREE') {
-        if (!users[userId]) {
-          users[userId] = { id: userId, first_name: from.first_name || '', last_name: from.last_name || '', username: from.username || '', phone: '', vipSent: false, joinDate: new Date().toISOString() };
-          saveUsers();
-        }
         await sendVipLinkToUser(userId, chatId, cb.id);
         return;
       }
 
-      // Admin callbacks
-      if (data?.startsWith('ADMIN_') && isAdmin(userId)) {
+      if (data && data.startsWith('ADMIN_')) {
+        if (!isAdmin(userId)) { await safeAnswerCallback(cb.id, '⛔ شما ادمین نیستید.'); return; }
         switch (data) {
-          case 'ADMIN_VIEW_WELCOME':
-            await tg('answerCallbackQuery', { callback_query_id: cb.id });
-            await sendMessage(chatId, `پیام خوش‌آمد فعلی:\n\n${config.welcomeMessage}`);
+          case 'ADMIN_VIEW_WELCOME': await safeAnswerCallback(cb.id); await sendMessage(chatId, `پیام خوش‌آمد فعلی:\n\n${config.welcomeMessage}`); break;
+          case 'ADMIN_EDIT_WELCOME': config.waitingFor[userId] = { type: 'WELCOME' }; saveConfig(); await safeAnswerCallback(cb.id); await sendMessage(chatId, 'لطفاً متن جدید خوش‌آمد را ارسال کنید.'); break;
+          case 'ADMIN_VIEW_AGREEMENT': await safeAnswerCallback(cb.id); await sendMessage(chatId, `متن توافقنامه فعلی:\n\n${config.agreementText}`); break;
+          case 'ADMIN_EDIT_AGREEMENT': config.waitingFor[userId] = { type: 'AGREEMENT' }; saveConfig(); await safeAnswerCallback(cb.id); await sendMessage(chatId, 'لطفاً متن جدید توافقنامه را ارسال کنید.'); break;
+          case 'ADMIN_VIEW_VIP': await safeAnswerCallback(cb.id); await sendMessage(chatId, `لینک دستی VIP:\n${config.manualVipLinks?.current || config.vipChannelLink || 'تنظیم نشده'}\nvipChannelId (برای اتومات): ${config.vipChannelId || 'تنظیم نشده'}`); break;
+          case 'ADMIN_EDIT_VIP': config.waitingFor[userId] = { type: 'VIP' }; saveConfig(); await safeAnswerCallback(cb.id); await sendMessage(chatId, 'لطفاً لینک جدید VIP یا شناسه کانال را ارسال کنید.'); break;
+          case 'ADMIN_VIEW_ADMINS': await safeAnswerCallback(cb.id); await sendMessage(chatId, `ادمین‌ها:\n${config.admins.join('\n')}`); break;
+          case 'ADMIN_LIST_USERS': {
+            await safeAnswerCallback(cb.id);
+            const lines = Object.values(users).map(u => `${u.id}|${u.first_name} ${u.last_name}|${u.username ? ('@' + u.username) : '-'}|${u.phone || '-'}|vip:${u.vipSent ? '✅' : '❌'}`).join('\n');
+            for (const p of chunkText(lines)) { await sendMessage(chatId, p); await new Promise(r => setTimeout(r, 200)); }
             break;
-          case 'ADMIN_EDIT_WELCOME':
-            config.waitingFor = { type: 'WELCOME', by: userId }; saveConfig();
-            await tg('answerCallbackQuery', { callback_query_id: cb.id });
-            await sendMessage(chatId, 'لطفاً متن جدید خوش‌آمد را ارسال کنید (پیام).');
-            break;
-          case 'ADMIN_VIEW_AGREEMENT':
-            await tg('answerCallbackQuery', { callback_query_id: cb.id });
-            await sendMessage(chatId, `متن توافقنامه فعلی:\n\n${config.agreementText}`);
-            break;
-          case 'ADMIN_EDIT_AGREEMENT':
-            config.waitingFor = { type: 'AGREEMENT', by: userId }; saveConfig();
-            await tg('answerCallbackQuery', { callback_query_id: cb.id });
-            await sendMessage(chatId, 'لطفاً متن جدید توافقنامه را ارسال کنید (پیام).');
-            break;
-          case 'ADMIN_VIEW_VIP':
-            await tg('answerCallbackQuery', { callback_query_id: cb.id });
-            await sendMessage(chatId, `لینک دستی VIP:\n${(config.manualVipLinks && config.manualVipLinks.current) ? config.manualVipLinks.current : (config.vipChannelLink || 'تنظیم نشده')}\n\nکانال (برای لینک اتومات): ${config.vipChannelId || 'تنظیم نشده'}`);
-            break;
-          case 'ADMIN_EDIT_VIP':
-            config.waitingFor = { type: 'VIP', by: userId }; saveConfig();
-            await tg('answerCallbackQuery', { callback_query_id: cb.id });
-            await sendMessage(chatId, 'لطفاً لینک جدید VIP (یا آدرس کانال برای اتومات) را ارسال کنید (پیام).');
-            break;
-          case 'ADMIN_VIEW_ADMINS':
-            await tg('answerCallbackQuery', { callback_query_id: cb.id });
-            await sendMessage(chatId, `ادمین‌ها:\n\n${(config.admins && config.admins.length) ? config.admins.join('\n') : 'هیچ ادمینی ثبت نشده'}`);
-            break;
-          case 'ADMIN_LIST_USERS':
-            await tg('answerCallbackQuery', { callback_query_id: cb.id });
-            const lines = Object.values(users).map(u => `${u.id} | ${u.first_name||''} ${u.last_name||''} | ${u.username ? '@'+u.username : '-'} | ${u.phone || '-'} | vip:${u.vipSent ? '✅' : '❌'}`).join('\n');
-            if (!lines) { await sendMessage(chatId, 'هیچ کاربری ثبت نشده.'); }
-            else {
-              const parts = chunkText(lines, 3000);
-              for (const p of parts) await sendMessage(chatId, p);
-            }
-            break;
-          case 'ADMIN_ADD_ADMIN':
-            config.waitingFor = { type: 'ADDADMIN', by: userId }; saveConfig();
-            await tg('answerCallbackQuery', { callback_query_id: cb.id });
-            await sendMessage(chatId, 'شناسهٔ عددی کاربر (user id) یا @username برای اضافه شدن به ادمین‌ها ارسال کن.');
-            break;
-          case 'ADMIN_REMOVE_ADMIN':
-            config.waitingFor = { type: 'REMOVEADMIN', by: userId }; saveConfig();
-            await tg('answerCallbackQuery', { callback_query_id: cb.id });
-            await sendMessage(chatId, 'شناسهٔ عددی ادمینی که می‌خواهی حذف شود را ارسال کن.');
-            break;
-          case 'VIP_MODE_AUTO':
-            config.vipSendMode = 'auto'; saveConfig();
-            await tg('answerCallbackQuery', { callback_query_id: cb.id, text: '✅ حالت VIP روی اتوماتیک تنظیم شد.' });
-            break;
-          case 'VIP_MODE_MANUAL':
-            config.vipSendMode = 'manual'; saveConfig();
-            await tg('answerCallbackQuery', { callback_query_id: cb.id, text: '✅ حالت VIP روی دستی تنظیم شد.' });
-            break;
-          default:
-            await tg('answerCallbackQuery', { callback_query_id: cb.id });
+          }
+          case 'ADMIN_ADD_ADMIN': config.waitingFor[userId] = { type: 'ADDADMIN' }; saveConfig(); await safeAnswerCallback(cb.id); await sendMessage(chatId, 'شناسه عددی یا @username برای اضافه شدن به ادمین‌ها ارسال کن.'); break;
+          case 'ADMIN_REMOVE_ADMIN': config.waitingFor[userId] = { type: 'REMOVEADMIN' }; saveConfig(); await safeAnswerCallback(cb.id); await sendMessage(chatId, 'شناسه ادمینی که می‌خواهی حذف شود را ارسال کن.'); break;
+          case 'VIP_MODE_AUTO': config.vipSendMode = 'auto'; saveConfig(); await safeAnswerCallback(cb.id, '✅ حالت VIP روی اتوماتیک تنظیم شد.'); break;
+          case 'VIP_MODE_MANUAL': config.vipSendMode = 'manual'; saveConfig(); await safeAnswerCallback(cb.id, '✅ حالت VIP روی دستی تنظیم شد.'); break;
+          default: await safeAnswerCallback(cb.id);
         }
         return;
       }
-
-      // admin-only callback attempted by non-admin
-      if (data?.startsWith('ADMIN_') && !isAdmin(userId)) {
-        await tg('answerCallbackQuery', { callback_query_id: cb.id, text: '⛔ شما ادمین نیستید.' });
-        return;
-      }
-
-      // fallback
-      await tg('answerCallbackQuery', { callback_query_id: cb.id });
     }
-  } catch (err) {
-    console.error('handleUpdate error', err && (err.stack || err.message || err));
+
+  } catch (e) {
+    console.error('Webhook handler error', e?.stack || e?.message || e);
   }
-}
-
-// --- Express + webhook ---
-const app = express();
-app.use(express.json({ limit: '200kb' }));
-
-// webhook endpoint
-app.post(`/webhook/${BOT_TOKEN}`, async (req, res) => {
-  res.sendStatus(200); // ack quickly
-  try { await handleUpdate(req.body); } catch (e) { console.error('update processing failed', e && e.message); }
 });
 
-app.get('/', (req, res) => res.send('NEJJATEBOT running'));
-app.get('/healthz', (req, res) => res.send('OK'));
-
+// ------------------ Start server & set webhook ------------------
 const PORT = process.env.PORT ? Number(process.env.PORT) : 10000;
 app.listen(PORT, async () => {
-  console.log(`Server running on port: ${PORT}`);
-  if (!WEBHOOK_URL) {
-    console.warn('WEBHOOK_URL not set - webhook will not be configured. Set WEBHOOK_URL env var to your public URL.');
-    return;
-  }
-  const hook = `${WEBHOOK_URL.replace(/\/$/, '')}/webhook/${BOT_TOKEN}`;
-  try {
-    const res = await tg('setWebhook', { url: hook });
-    if (res && res.ok) console.log('Webhook با موفقیت ست شد!');
-    else console.warn('setWebhook response:', res);
-  } catch (e) { console.error('Failed to set webhook:', e && (e.message || e)); }
-});
+  console.log(`Server running on port ${PORT}`);
+  const WEBHOOK_U
